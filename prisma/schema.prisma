@@ -1,0 +1,271 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Base model with common fields
+model BaseModel {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+  
+  @@map("_BaseModel")
+  @@ignore
+}
+
+// User accounts with authentication
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  password      String    @default("") // Hashed password
+  name          String
+  role          UserRole  @default(STAFF)
+  isActive      Boolean   @default(true) @map("is_active")
+  lastLoginAt   DateTime? @map("last_login_at")
+  resetToken    String?   @unique @map("reset_token")
+  resetTokenExp DateTime? @map("reset_token_exp")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  
+  sales     Sale[]
+  inventory InventoryLog[]
+  
+  @@map("users")
+}
+
+// Product catalog
+model Product {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  barcode     String?  @unique
+  gtin        String?  @unique
+  category    String?
+  iva         Float    @default(0.21)
+  requiresPrescription Boolean @default(false) @map("requires_prescription")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  
+  batches     Batch[]
+  salesItems  SaleItem[]
+  prescriptionItems PrescriptionItem[]
+  inventoryLogs InventoryLog[]
+  
+  @@map("products")
+}
+
+// Product batches with expiration tracking
+model Batch {
+  id          String   @id @default(cuid())
+  productId   String   @map("product_id")
+  batchNumber String   @map("batch_number")
+  expiryDate  DateTime @map("expiry_date")
+  quantity    Int      @default(0)
+  costPrice   Float    @default(0) @map("cost_price")
+  salePrice   Float    @default(0) @map("sale_price")
+  supplierId  String?  @map("supplier_id")
+  location    String?
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  
+  product     Product  @relation(fields: [productId], references: [id])
+  supplier    Supplier? @relation(fields: [supplierId], references: [id])
+  saleItems   SaleItem[]
+  inventoryLogs InventoryLog[]
+  
+  @@unique([productId, batchNumber])
+  @@map("batches")
+}
+
+// Sales and transactions
+model Sale {
+  id              String     @id @default(cuid())
+  invoiceNumber   String?    @unique @map("invoice_number")
+  customerId      String?    @map("customer_id")
+  userId          String     @map("user_id")
+  subtotal        Float      @default(0)
+  tax             Float      @default(0)
+  discount        Float      @default(0)
+  total           Float      @default(0)
+  paymentMethod   String?    @map("payment_method")
+  paymentStatus   String     @default("pending") @map("payment_status")
+  status          SaleStatus @default(COMPLETED)
+  notes           String?
+  createdAt       DateTime   @default(now()) @map("created_at")
+  updatedAt       DateTime   @updatedAt @map("updated_at")
+  
+  customer    Customer? @relation(fields: [customerId], references: [id])
+  user        User      @relation(fields: [userId], references: [id])
+  items       SaleItem[]
+  prescriptions Prescription[]
+  
+  @@map("sales")
+}
+
+// Sale line items
+model SaleItem {
+  id          String   @id @default(cuid())
+  saleId      String   @map("sale_id")
+  productId   String   @map("product_id")
+  batchId     String   @map("batch_id")
+  quantity    Int
+  unitPrice   Float    @map("unit_price")
+  subtotal    Float
+  discount    Float    @default(0)
+  tax         Float    @default(0)
+  total       Float
+  createdAt   DateTime @default(now()) @map("created_at")
+  
+  sale        Sale     @relation(fields: [saleId], references: [id])
+  product     Product  @relation(fields: [productId], references: [id])
+  batch       Batch    @relation(fields: [batchId], references: [id])
+  
+  @@map("sale_items")
+}
+
+// Customer information
+model Customer {
+  id           String   @id @default(cuid())
+  name         String
+  email        String?  @unique
+  phone        String?
+  address      String?
+  city         String?
+  state        String?
+  postalCode   String?  @map("postal_code")
+  country      String?  @default("Uruguay")
+  taxId        String?  @unique @map("tax_id") // RUT for Uruguay
+  isActive     Boolean  @default(true) @map("is_active")
+  notes        String?
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+  
+  sales        Sale[]
+  prescriptions Prescription[]
+  
+  @@map("customers")
+}
+
+// Prescription tracking
+model Prescription {
+  id             String     @id @default(cuid())
+  customerId     String?    @map("customer_id")
+  doctorName     String     @map("doctor_name")
+  doctorLicense  String?    @map("doctor_license")
+  institution   String?
+  diagnosis     String?
+  externalId    String?    @unique @map("external_id") // For electronic prescriptions
+  status        PrescriptionStatus @default(PENDING)
+  notes         String?
+  expiresAt     DateTime?  @map("expires_at")
+  createdAt     DateTime   @default(now()) @map("created_at")
+  updatedAt     DateTime   @updatedAt @map("updated_at")
+  
+  customer      Customer?  @relation(fields: [customerId], references: [id])
+  sale          Sale?      @relation(fields: [saleId], references: [id])
+  saleId        String?    @map("sale_id")
+  items         PrescriptionItem[]
+  
+  @@map("prescriptions")
+}
+
+model PrescriptionItem {
+  id              String      @id @default(cuid())
+  prescriptionId  String      @map("prescription_id")
+  productId       String      @map("product_id")
+  quantity        Int
+  dosage          String?     // e.g., "1 cada 8 horas"
+  duration        String?     // e.g., "10 días"
+  notes           String?
+  
+  prescription    Prescription @relation(fields: [prescriptionId], references: [id])
+  product         Product      @relation(fields: [productId], references: [id])
+  
+  @@map("prescription_items")
+}
+
+// Suppliers and vendors
+model Supplier {
+  id           String   @id @default(cuid())
+  name         String
+  contactName  String?  @map("contact_name")
+  email        String?
+  phone        String?
+  address      String?
+  city         String?
+  state        String?
+  postalCode   String?  @map("postal_code")
+  country      String?  @default("Uruguay")
+  taxId        String?  @unique @map("tax_id") // RUT for Uruguay
+  isActive     Boolean  @default(true) @map("is_active")
+  notes        String?
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+  
+  batches      Batch[]
+  
+  @@map("suppliers")
+}
+
+// Inventory tracking
+model InventoryLog {
+  id          String        @id @default(cuid())
+  productId   String        @map("product_id")
+  batchId     String?       @map("batch_id")
+  userId      String        @map("user_id")
+  type        InventoryType
+  quantity    Int
+  notes       String?
+  referenceId String?      @map("reference_id") // For linking to sales, purchases, etc.
+  referenceType String?     @map("reference_type")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  
+  product     Product      @relation(fields: [productId], references: [id])
+  batch       Batch?       @relation(fields: [batchId], references: [id])
+  user        User         @relation(fields: [userId], references: [id])
+  
+  @@map("inventory_logs")
+}
+
+// Enums
+enum UserRole {
+  ADMIN     // Full access
+  MANAGER   // Can manage inventory, view reports
+  PHARMACIST // Can dispense medication
+  CASHIER   // Can process sales
+  STAFF     // Basic access
+}
+
+enum SaleStatus {
+  DRAFT      // In progress
+  COMPLETED  // Sale finalized
+  CANCELLED  // Sale cancelled
+  REFUNDED   // Sale refunded
+}
+
+enum PrescriptionStatus {
+  PENDING    // Created but not used
+  FULFILLED  // Prescription has been used
+  EXPIRED    // Prescription has expired
+  CANCELLED  // Prescription was cancelled
+}
+
+enum InventoryType {
+  PURCHASE    // Added from supplier
+  SALE        // Sold to customer
+  ADJUSTMENT  // Manual adjustment
+  RETURN      // Return from customer
+  LOSS        // Lost, expired, damaged
+  TRANSFER_IN // Transferred from another location
+  TRANSFER_OUT // Transferred to another location
+}
